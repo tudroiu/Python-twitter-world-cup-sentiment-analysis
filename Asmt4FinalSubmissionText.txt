@@ -1,0 +1,364 @@
+#section One: Mining
+#this section of code denoted by a line of stars is used to access the host application, 
+#in this case twitter and mine data we need. 
+import tweepy
+from tweepy.streaming import StreamListener
+from tweepy import OAuthHandler
+from tweepy import Stream
+
+consumer_key = 'Insert your API Key'
+consumer_secret = 'Insert your API Secret'
+access_token = 'Insert your Access Token'
+access_secret = 'Insert your Access Token Secret'
+
+auth = OAuthHandler(consumer_key, consumer_secret)
+auth.set_access_token(access_token, access_secret)
+
+api = tweepy.API(auth)
+ 
+class MyListener(StreamListener):
+ 
+    def on_data(self, data):
+        try:
+            with open('C:/Users/Tudor/Desktop/BDA 102/Assignments/Assignment 4/fifa2.json', 'a') as f:
+                f.write(data)
+            
+        except BaseException as e:
+            print("Error on data: %s" % str(e))
+            pass
+ 
+    def on_error(self, status):
+        print(status)
+        return True
+
+twitter_stream = Stream(auth, MyListener())
+twitter_stream.filter(languages=["en"], track=['#FIFAWorldCup','FIFAWorldCup','#FiFaWorldCup2018'])
+
+##############################################################################################################
+#Section two, Cleaning,  this second section will both make a CSV which we will use to manilpulate our data. We will also clean for 
+#certain words we have identified as non-purposeful text as these tweets contain links and images potentially.
+
+import json, pandas, nltk, re
+nltk.download('punkt')
+
+# Open a file called pytweets in read mode 
+with open('C:/Users/Tudor/Desktop/BDA 102/Assignments/Assignment 4/fifa2.json', 'r') as file:
+    checklist = []
+    corpus = []
+    users = []
+    count = 0
+    location= []
+    # Iterate over each line in pytweets.json
+    for line in file:
+        # Check if the current tweet is already collected, if not then asssess it
+        if line not in checklist:
+            checklist.append(line)
+            # Count setting used to limit the tweets we take from the JSON file
+            # **** Set it to whatever you need ****
+            if count <= 100000:
+                try:
+                    # Set tweet to store each line as json - enabling us to call attributes
+                    tweet = json.loads(line)
+                    # Store tweet text in a variable
+                    tweettext = ascii(tweet['text'])
+                    # Append that variable to a list aka our corpus
+                    corpus.append(tweettext)
+                    # Do the same for the twitter username
+                    tweetuser = ascii(tweet['user']['screen_name'])
+                    users.append(tweetuser)
+                    loc  = ascii(tweet['user']['location'])
+                    location.append(loc)
+
+                    print("tweettext = ", tweettext)
+                except:
+                    # Pass statement is used to avoid any invalid json tweets
+                    # caused by stop-and-start streaming
+                    pass
+            # Count setting to stop the loop when we've hit our max number of tweets
+            # ***** Set it according to the setting above *****
+            elif count > 100000:
+                break
+        # If tweet is already in checklist then pass over it to avoid duplicates/spam tweets
+        if line in checklist:
+            pass
+            # Count setting to stop the loop when we've hit our max number of tweets
+        # If tweet is already in checklist then pass over it to avoid duplicates/spam tweets
+      
+    
+#this is a test to see our tweets and their "clean" counterpart.
+#Print the count of tweets you will analyze
+print(count, "Tweets\n")
+#Print an example of raw tweet text
+print("7th Tweet:",corpus[6])
+#Print the username associated with the tweet
+print("\nTweeted by: ",users[6])
+
+#Clean our tweets by looping through each one in our corpus
+cleanlist = []
+for i in corpus:
+    #Remove new lines
+    value = i.replace("\\n"," ")
+    #Remove any https links in tweet
+    value = re.sub(r'http\S+', ' ', value)
+    #Remove any "&" in tweet
+    value = value.replace("&amp;"," ")
+    #Remove any usernames from the tweet
+    value = re.sub(r'@\S+', ' ', value)
+    #Remove special characters
+    value = re.sub(r'[.?!#$%^<>\[\]*+-=_:;\\)("|]', ' ', value)
+    #Remove emojis that have a code starting with "\u"
+    value = re.sub(r'\\u\S+', ' ', value)
+    #Remove emojis that have a code starting with "\U"
+    value = re.sub(r'\\U\S+', ' ', value)
+    #Remove any words containing a "\" as they are also emoji codes
+    value = re.sub(r'\S*\\\S*', ' ', value)
+    #Remove any numbers in tweet
+    value = re.sub(r'[0-9]', ' ', value)
+    #Remove any apostrophes in tweet
+    value = value.replace("'","")
+    #Remove words that are 2 characters or less in length
+    value = re.sub(r'\b\w{1,2}\b', ' ', value)
+    #Remove two or more spaces with just one
+    value = re.sub(r'\s{2,}', ' ', value)
+    #Remove any leading spaces
+    value = re.sub(r"^\s+" , "" , value)
+    #Append cleaned tweet to our list
+    cleanlist.append(value)
+
+#Print an example of a cleaned tweet
+print("\n7th Tweet Cleaned up:",cleanlist[7])
+
+#Set up list of data with username and cleaned tweet, so we can plug it into
+#our pandas dataframe
+tweet_Location = []
+x = 0
+for i in cleanlist:
+    username = users[x].replace("'","")
+    row = [username,i,location[x]]
+    tweet_Location.append(row)
+    x+=1
+
+tweetLocationcsv = pd.DataFrame(tweet_Location)
+tweetLocationcsv.columns=['user','tweet', 'location']
+tweetLocationcsv.to_csv(r'C:/Users/Tudor/Desktop/BDA 102/Assignments/Assignment 4/tweetLocation.csv')
+
+#####################################################################################################################
+#section three:
+#using our previously created CSV we will use this to then find our insight
+# we must furtherclean our array/csv with regard to location. 
+# then filter tweets for our chosen players: Ronaldo, Neymar, and Messi
+
+tweetLocationcsv = pd.read_csv(r'C:/Users/Tudor/Desktop/BDA 102/Assignments/Assignment 4/tweetLocation.csv')
+
+#eliminate ' character
+tweetLocationcsv['location'] = tweetLocationcsv['location'].str.replace("'", "")
+
+#split city/country into 2 new columns
+tweetLocationcsv = tweetLocationcsv.join((tweetLocationcsv['location'].str.rsplit(',', 1, expand=True)))
+
+#rename columns
+tweetLocationcsv.rename(columns={0: "city", 1: "country"}, inplace=True)
+
+#eliminate spaces from country column
+tweetLocationcsv['country'] = tweetLocationcsv['country'].str.strip()
+
+#Create list of Countries
+from  pycountry import countries
+listOfCountries=[]
+for item in countries:
+    listOfCountries.append(item.name.upper())
+
+#Make all countries Capital to make sure they match
+tweetLocationcsv['city'] = tweetLocationcsv['city'].str.upper()
+tweetLocationcsv['country'] = tweetLocationcsv['country'].str.upper()
+
+    
+#Move countries to country column and cities to city to city columns
+ix=0
+for citi in tweetLocationcsv['city']:
+    if citi in listOfCountries:
+        tweetLocationcsv.at[ix, 'country']   = citi
+    ix+=1
+
+#keep only tweets location that exist in the list of countries
+tweetLocationcsv = tweetLocationcsv[tweetLocationcsv['country'].isin(listOfCountries)]
+
+#Visualize count of tweets by country (TOP 25)
+import seaborn as sns
+tweetLocationcsv['country'].value_counts().head(25).plot.bar()
+
+#make all tweets lowercase to make sure it matches the search
+tweetLocationcsv['tweet'] = tweetLocationcsv['tweet'].str.lower()
+
+#found some records where tweet is empty
+tweetLocationcsv= tweetLocationcsv.dropna()
+
+#******************************************************************************************
+# TWEETS ABOUT PLAYERS PER COUNTRY
+#create new dataframe only with tweets about messi
+messiTweets =  tweetLocationcsv[tweetLocationcsv['tweet'].str.contains("messi")]
+ronaldoTweets =  tweetLocationcsv[tweetLocationcsv['tweet'].str.contains("ronaldo")]
+neymarTweets =  tweetLocationcsv[tweetLocationcsv['tweet'].str.contains("neymar")]
+
+messiTweets[['tweet', 'country']].groupby(['country']).agg(['count']).plot.bar().set_title("All tweets about Messi")
+ronaldoTweets[['tweet', 'country']].groupby(['country']).agg(['count']).plot.bar().set_title("All tweets about Ronaldo")
+neymarTweets[['tweet', 'country']].groupby(['country']).agg(['count']).plot.bar().set_title("All tweets about Neymar")
+
+#Section Four: Train our classisfier
+#******************************************************************************************
+#******************************************************************************************
+#******************************************************************************************
+#******************************************************************************************
+#******************************************************************************************
+#POSITIVE/NEGATIVE TWEETS ABOUT PLAYERS PER COUNTRY
+
+#these next 2 csv files are files found  online created by a 3rd party to train the model for pos & neg
+#they are included in the Zip folder with these filenames, the path must be adjusted to you location
+trainingDataPos = pd.read_csv(r'C:/Users/Tudor/Desktop/BDA 102/Assignments/Assignment 4/trainingdataPos.csv')
+trainingDataNeg = pd.read_csv(r'C:/Users/Tudor/Desktop/BDA 102/Assignments/Assignment 4/trainingdataNeg.csv')
+
+trainingDataPos = trainingDataPos.drop(columns=['a','b', 'c', 'user'])
+trainingDataNeg = trainingDataNeg.drop(columns=['a','b', 'c', 'user'])
+
+#converting 0 to Negative and 4 to Positive
+trainingDataNeg['sentiment'] = trainingDataNeg['sentiment'].map({0:'Negative'})
+trainingDataPos['sentiment'] = trainingDataPos['sentiment'].map({4:'Positive'})
+
+from nltk.corpus import stopwords
+from nltk.classify import SklearnClassifier
+
+#Convert DataFrame to List
+trainingDataPosList = []
+for pair in trainingDataPos.values:
+    trainingDataPosList.append([pair[1], pair[0]])
+trainingDataNegList = []
+for pair in trainingDataNeg.values:
+    trainingDataNegList.append([pair[1], pair[0]])
+    
+#make dicitionary from classifier
+
+def word_feats(words):
+    return dict([(word, True) for word in words.split() ])
+
+positiveWords=[]
+for line in trainingDataPosList:
+    positiveWords = positiveWords + [(word_feats(f), 'Positive') for f in line[0].split() if line[1] =='Positive']
+
+negativeWords=[]
+for line in trainingDataNegList:
+    negativeWords = negativeWords + [(word_feats(f), 'Negative') for f in line[0].split() if line[1] =='Negative']
+
+trainingTweets = positiveWords + negativeWords
+
+classifier =nltk.NaiveBayesClassifier.train(trainingTweets)
+
+
+#Analize Messi Tweets and add sentiment to DataFrame
+#add empty column to hold sentiment
+
+messiNegativeCounts=0
+messiPositiveCounts=0
+for mtweet in messiTweets.values:
+    if classifier.classify(word_feats(mtweet[2])) == 'Positive':
+        messiTweets.at[mtweet[0], 'sentiment'] = 'Positive'
+        messiPositiveCounts+=1
+    else:
+        messiTweets.at[mtweet[0], 'sentiment'] = 'Negative'
+        messiNegativeCounts+=1
+
+#Analize Ronaldo Tweets and add sentiment to DataFrame
+#add empty column to hold sentiment
+ronaldoNegativeCounts=0
+ronaldoPositiveCounts=0
+for rtweet in ronaldoTweets.values:
+    if classifier.classify(word_feats(rtweet[2])) == 'Positive':
+        ronaldoTweets.at[rtweet[0], 'sentiment'] = 'Positive'
+        ronaldoPositiveCounts+=1
+    else:
+        ronaldoTweets.at[rtweet[0], 'sentiment'] = 'Negative'
+        ronaldoNegativeCounts+=1
+
+
+#Analize Neymar Tweets and add sentiment to DataFrame
+#add empty column to hold sentiment
+neymarNegativeCounts=0
+neymarPositiveCounts=0
+for ntweet in neymarTweets.values:
+    if classifier.classify(word_feats(ntweet[2])) == 'Positive':
+        neymarTweets.at[ntweet[0], 'sentiment'] = 'Positive'
+        neymarPositiveCounts+=1
+    else:
+        neymarTweets.at[ntweet[0], 'sentiment'] = 'Negative'
+        neymarNegativeCounts+=1
+
+messiTotalTweets = messiTweets['tweet'].count()
+ronaldoTotalTweets = ronaldoTweets['tweet'].count()
+neymarTotalTweets = neymarTweets['tweet'].count()
+
+#Secction 5: Sentiment analysis!
+
+print("\n",messiPositiveCounts, "Positive Tweets for Messi out of ",messiTotalTweets, " for ", "{0:2f}".format((messiPositiveCounts/messiTotalTweets)*100), "% of tweets where he is mentioned")
+print("\n",ronaldoPositiveCounts, "Positive Tweets for Ronaldo out of ",ronaldoTotalTweets, " for ", "{0:2f}".format((ronaldoPositiveCounts/ronaldoTotalTweets)*100), "% of tweets where he is mentioned")
+print("\n",neymarPositiveCounts, "Positive Tweets for Neymar out of ",neymarTotalTweets, " for ", "{0:2f}".format((neymarPositiveCounts/neymarTotalTweets)*100), "% of tweets where he is mentioned")
+    
+#PLOT Positive/Negative tweets comparisson by Country
+messiTweets[['tweet', 'country', 'sentiment']].groupby(['country', 'sentiment']).agg(['count']).plot.bar()
+ronaldoTweets[['tweet', 'country', 'sentiment']].groupby(['country', 'sentiment']).agg(['count']).plot.bar()
+neymarTweets[['tweet', 'country', 'sentiment']].groupby(['country', 'sentiment']).agg(['count']).plot.bar()
+
+#Plot country with most positive tweets
+messiTweets[messiTweets['sentiment'] == 'Positive'].groupby(['sentiment', 'country']).agg(['count']).plot.bar()
+messiTweets[messiTweets['sentiment'] == 'Negative'].groupby(['sentiment', 'country']).agg(['count']).plot.bar()
+
+#Plot country with most positive tweets (Ignoring INDIA)
+messiTweets[messiTweets['sentiment'] == 'Positive'][messiTweets['country'] != 'INDIA'].groupby(['sentiment', 'country']).agg(['count']).plot.bar().set_title("Positive Tweets about Messi")
+messiTweets[messiTweets['sentiment'] == 'Negative'][messiTweets['country'] != 'INDIA'].groupby(['sentiment', 'country']).agg(['count']).plot.bar().set_title("Negative Tweets about Messi")
+
+#Plot country with most positive tweets
+neymarTweets[neymarTweets['sentiment'] == 'Positive'].groupby(['sentiment', 'country']).agg(['count']).plot.bar()
+neymarTweets[neymarTweets['sentiment'] == 'Negative'].groupby(['sentiment', 'country']).agg(['count']).plot.bar()
+
+#Plot country with most positive tweets (Ignoring INDIA)
+neymarTweets[neymarTweets['sentiment'] == 'Positive'][neymarTweets['country'] != 'INDIA'].groupby(['sentiment', 'country']).agg(['count']).plot.bar().set_title("Positive Tweets about Neymar")
+neymarTweets[neymarTweets['sentiment'] == 'Negative'][neymarTweets['country'] != 'INDIA'].groupby(['sentiment', 'country']).agg(['count']).plot.bar().set_title("Negative Tweets about Neymar")
+
+#Plot country with most positive tweets
+ronaldoTweets[ronaldoTweets['sentiment'] == 'Positive'].groupby(['sentiment', 'country']).agg(['count']).plot.bar()
+ronaldoTweets[ronaldoTweets['sentiment'] == 'Negative'].groupby(['sentiment', 'country']).agg(['count']).plot.bar()
+
+#Plot country with most positive tweets (Ignoring INDIA)
+ronaldoTweets[ronaldoTweets['sentiment'] == 'Positive'][ronaldoTweets['country'] != 'INDIA'].groupby(['sentiment', 'country']).agg(['count']).plot.bar().set_title("Positive Tweets about Ronaldo")
+ronaldoTweets[ronaldoTweets['sentiment'] == 'Negative'][ronaldoTweets['country'] != 'INDIA'].groupby(['sentiment', 'country']).agg(['count']).plot.bar().set_title("Negative Tweets about Ronaldo")
+
+#TEST ACCURACY ************************************************************************************************************
+#*********************************************************************************************************************
+
+def feature_Extractor(tweet):
+    """
+    Takes a tweet and extracts its features
+    """
+    tweet_words = set(tweet)
+    features = {}
+    for word in featureList:
+        features['contains(%s)' % word] = (word in tweet_words)
+    return features
+
+testdata  = pd.read_csv(r'C:/Users/Tudor/Desktop/BDA 102/Assignments/Assignment 4/testdatamanual20090614.csv')
+test_data1=[]
+for line in testdata:
+    test_data = negativeWords + [(word_feats(f), 'Negative') for f in line[0].split() if line[1] =='Negative']
+test_data2=[]
+for line in testdata:
+    test_data2 = negativeWords + [(word_feats(f), 'Positive') for f in line[0].split() if line[1] =='Positive']
+
+test_data = test_data1+test_data2
+
+testing_set = nltk.classify.apply_features(feature_Extractor, test_data)
+
+accuracy = nltk.classify.accuracy(classifier, test_data)*100
+
+print('Accuracy: {:4.2f}'.format(nltk.classify.accuracy(classifier, test_data)))
+
+
+#END
+#*********************************************************************************************************************
